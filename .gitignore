@@ -1,3 +1,21 @@
-.env
+# Python files
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
