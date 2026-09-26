@@ -1,0 +1,26 @@
+name: Run Discord Bot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  discord-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Download bot files
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bot library
+        run: pip install -r requirements.txt
+
+      - name: Start Discord bot
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        run: python bot.py
