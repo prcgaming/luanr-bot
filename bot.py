@@ -23,8 +23,6 @@ from discord.ext import commands, tasks
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID_RAW = os.getenv("GUILD_ID")
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not configured.")
 
@@ -32,13 +30,6 @@ if not GUILD_ID_RAW or not GUILD_ID_RAW.isdigit():
     raise RuntimeError("GUILD_ID must be a numeric Discord server ID.")
 
 GUILD_ID = int(GUILD_ID_RAW)
-
-if DATABASE_URL and not DATABASE_URL.startswith(
-    ("sqlite://", "postgres://", "postgresql://")
-):
-    raise RuntimeError(
-        "DATABASE_URL must use sqlite://, postgres://, or postgresql://."
-    )
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -471,6 +462,73 @@ async def on_app_command_error(
             await interaction.response.send_message(message, ephemeral=True)
     except discord.HTTPException:
         logger.exception("Could not send command error response.")
+
+
+# ---------------------------------------------------------------------------
+# Help command
+# ---------------------------------------------------------------------------
+
+HELP_SECTIONS = {
+    "Getting Started": [
+        ("/help", "Show this help menu."),
+        ("/ping", "Check bot latency and connectivity."),
+        ("/setup_view", "View the current server configuration."),
+    ],
+    "Channel Management": [
+        ("/channel create", "Create a text channel."),
+        ("/channel delete", "Delete a channel."),
+        ("/channel rename", "Rename a channel."),
+        ("/channel topic", "Change a text channel topic."),
+        ("/channel slowmode", "Set channel slowmode."),
+        ("/hide", "Hide a channel from @everyone."),
+        ("/unhide", "Restore channel visibility."),
+        ("/lock", "Keep a channel visible but prevent messages."),
+        ("/unlock", "Restore the previous send-message permission."),
+    ],
+    "Moderation": [
+        ("/kick", "Kick a member."),
+        ("/ban", "Ban a member."),
+        ("/timeout", "Timeout a member."),
+        ("/untimeout", "Remove a member timeout."),
+        ("/warn", "Warn a member and save the case."),
+        ("/warnings", "View a member's recent warnings."),
+    ],
+}
+
+
+def build_help_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="🛠️ Server Management Bot — Help",
+        description=(
+            "Use the slash commands below to manage your server. "
+            "Commands are permission-protected where necessary.\n\n"
+            "**Tip:** Type `/` in Discord and start typing a command to see "
+            "its arguments and options."
+        ),
+        color=discord.Color.blurple(),
+    )
+
+    for section, commands_list in HELP_SECTIONS.items():
+        value = "\n".join(
+            f"`{command}` — {description}"
+            for command, description in commands_list
+        )
+        embed.add_field(name=section, value=value, inline=False)
+
+    embed.set_footer(text="Use /help anytime to see the available commands.")
+    return embed
+
+
+@bot.tree.command(
+    name="help",
+    description="Show the bot's commands and what they do.",
+)
+@app_commands.guild_only()
+async def help_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        embed=build_help_embed(),
+        ephemeral=True,
+    )
 
 
 # ---------------------------------------------------------------------------
