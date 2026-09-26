@@ -259,6 +259,17 @@ def format_message(
     return result[:2000]
 
 
+def target_display(member: discord.abc.User, notify: bool) -> str:
+    """
+    Render a moderation target either as a silent, non-pinging backtick
+    name (default) or as a real @mention when a moderator opts in with
+    the `notify` flag on a moderation command.
+    """
+    if notify:
+        return member.mention
+    return f"`{member}`"
+
+
 def member_can_be_moderated(
     moderator: discord.Member,
     target: discord.Member,
@@ -385,6 +396,7 @@ intents.members = True
 intents.messages = True
 intents.message_content = True
 intents.voice_states = True
+intents.bans = True
 
 bot = commands.Bot(
     command_prefix="!",
@@ -431,6 +443,9 @@ async def on_resumed() -> None:
 
 # ---------------------------------------------------------------------------
 # Global slash-command error handler
+#
+# NOTE: per your request, command output (including these error notices)
+# is now posted publicly in the channel instead of only to the invoker.
 # ---------------------------------------------------------------------------
 
 @bot.tree.error
@@ -457,9 +472,9 @@ async def on_app_command_error(
 
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
+            await interaction.followup.send(message, ephemeral=False)
         else:
-            await interaction.response.send_message(message, ephemeral=True)
+            await interaction.response.send_message(message, ephemeral=False)
     except discord.HTTPException:
         logger.exception("Could not send command error response.")
 
@@ -486,12 +501,16 @@ HELP_SECTIONS = {
         ("/unlock", "Restore the previous send-message permission."),
     ],
     "Moderation": [
-        ("/kick", "Kick a member."),
-        ("/ban", "Ban a member."),
-        ("/timeout", "Timeout a member."),
+        ("/kick", "Kick a member (optional notify to @mention them)."),
+        ("/ban", "Ban a member (optional notify to @mention them)."),
+        ("/unban", "Unban a user by their ID."),
+        ("/timeout", "Timeout a member (optional notify to @mention them)."),
         ("/untimeout", "Remove a member timeout."),
         ("/warn", "Warn a member and save the case."),
         ("/warnings", "View a member's recent warnings."),
+        ("/purge", "Bulk delete recent messages, optionally by one member."),
+        ("/case", "Look up a single moderation case by its ID."),
+        ("/history", "View a member's full moderation history."),
     ],
 }
 
@@ -501,7 +520,8 @@ def build_help_embed() -> discord.Embed:
         title="🛠️ Server Management Bot — Help",
         description=(
             "Use the slash commands below to manage your server. "
-            "Commands are permission-protected where necessary.\n\n"
+            "Commands are permission-protected where necessary, and their "
+            "results are posted here in the channel for everyone to see.\n\n"
             "**Tip:** Type `/` in Discord and start typing a command to see "
             "its arguments and options."
         ),
@@ -527,7 +547,7 @@ def build_help_embed() -> discord.Embed:
 async def help_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(
         embed=build_help_embed(),
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -545,7 +565,7 @@ async def ping(interaction: discord.Interaction) -> None:
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(
         f"Pong: {latency} ms.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -652,7 +672,7 @@ async def setup_view(interaction: discord.Interaction) -> None:
     if not settings and not welcome and not boost:
         embed.description = "No server settings have been configured yet."
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +705,7 @@ async def channel_create(
     if len(name) < 1:
         await interaction.response.send_message(
             "Channel names must contain at least one valid character.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -698,20 +718,20 @@ async def channel_create(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to create channels.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel creation failed in guild %s", guild.id)
         await interaction.response.send_message(
             "Discord rejected the channel creation request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"Created {channel.mention}.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -734,7 +754,7 @@ async def channel_delete(
     if channel.id == interaction.channel_id:
         await interaction.response.send_message(
             "For safety, use this command from another channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -745,20 +765,20 @@ async def channel_delete(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to delete that channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel deletion failed in guild %s", guild.id)
         await interaction.response.send_message(
             "Discord rejected the channel deletion request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         "The channel was deleted.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -784,7 +804,7 @@ async def channel_rename(
     if not name:
         await interaction.response.send_message(
             "That is not a valid channel name.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -796,20 +816,20 @@ async def channel_rename(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to rename that channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel rename failed.")
         await interaction.response.send_message(
             "Discord rejected the channel rename request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"Renamed the channel to `{name}`.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -833,20 +853,20 @@ async def channel_topic(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to edit that channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel topic update failed.")
         await interaction.response.send_message(
             "Discord rejected the topic update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         "The channel topic was updated.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -870,20 +890,20 @@ async def channel_slowmode(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to change slowmode.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Slowmode update failed.")
         await interaction.response.send_message(
             "Discord rejected the slowmode update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"Slowmode set to {seconds} seconds.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -980,20 +1000,20 @@ async def hide_channel(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to change that channel's permissions.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel hide failed.")
         await interaction.response.send_message(
             "Discord rejected the permission update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"{channel.mention} is now hidden from @everyone.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -1032,20 +1052,20 @@ async def unhide_channel(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to change that channel's permissions.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel unhide failed.")
         await interaction.response.send_message(
             "Discord rejected the permission update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"{channel.mention} visibility was restored.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -1070,7 +1090,7 @@ async def lock_channel(
     ):
         await interaction.response.send_message(
             "You need Manage Channels or Manage Messages.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1097,20 +1117,20 @@ async def lock_channel(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to lock that channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel lock failed.")
         await interaction.response.send_message(
             "Discord rejected the permission update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"{channel.mention} is locked. Members can still view it.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -1135,7 +1155,7 @@ async def unlock_channel(
     ):
         await interaction.response.send_message(
             "You need Manage Channels or Manage Messages.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1161,20 +1181,20 @@ async def unlock_channel(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to unlock that channel.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Channel unlock failed.")
         await interaction.response.send_message(
             "Discord rejected the permission update.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"{channel.mention} send permission was restored.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
     await send_log(
@@ -1188,12 +1208,18 @@ bot.tree.add_command(channel_group)
 
 # ---------------------------------------------------------------------------
 # Moderation commands
+#
+# Each punitive command below now takes an optional `notify` flag. When a
+# moderator sets notify=True, the public announcement and the mod-log entry
+# will @mention the target member instead of showing their name in plain
+# backticks (which never pings). Default is False so pings stay opt-in.
 # ---------------------------------------------------------------------------
 
 @bot.tree.command(name="kick", description="Kick a member.")
 @app_commands.describe(
     member="The member to kick.",
     reason="The reason for the kick.",
+    notify="If true, publicly @mention the member instead of just naming them.",
 )
 @app_commands.guild_only()
 @app_commands.checks.has_permissions(kick_members=True)
@@ -1202,6 +1228,7 @@ async def kick_member(
     interaction: discord.Interaction,
     member: discord.Member,
     reason: str = "No reason provided.",
+    notify: bool = False,
 ) -> None:
     guild = interaction.guild
     moderator = interaction.user
@@ -1210,29 +1237,30 @@ async def kick_member(
 
     allowed, error = member_can_be_moderated(moderator, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     allowed, error = bot_can_manage_member(guild, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     reason = safe_text(reason, 500)
+    display = target_display(member, notify)
 
     try:
         await member.kick(reason=reason)
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to kick that member.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Kick failed in guild %s", guild.id)
         await interaction.response.send_message(
             "Discord rejected the kick request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1245,13 +1273,13 @@ async def kick_member(
     )
 
     await interaction.response.send_message(
-        f"{member} was kicked. Case #{case_id}.",
-        ephemeral=True,
+        f"{display} was kicked. Case #{case_id}.",
+        ephemeral=False,
     )
 
     await send_log(
         guild,
-        f"Case #{case_id}: {moderator.mention} kicked `{member}`. Reason: {reason}",
+        f"Case #{case_id}: {moderator.mention} kicked {display}. Reason: {reason}",
     )
 
 
@@ -1260,6 +1288,7 @@ async def kick_member(
     member="The member to ban.",
     reason="The reason for the ban.",
     delete_message_days="Days of recent messages to delete, from 0 to 7.",
+    notify="If true, publicly @mention the member instead of just naming them.",
 )
 @app_commands.guild_only()
 @app_commands.checks.has_permissions(ban_members=True)
@@ -1269,6 +1298,7 @@ async def ban_member(
     member: discord.Member,
     reason: str = "No reason provided.",
     delete_message_days: app_commands.Range[int, 0, 7] = 0,
+    notify: bool = False,
 ) -> None:
     guild = interaction.guild
     moderator = interaction.user
@@ -1277,15 +1307,16 @@ async def ban_member(
 
     allowed, error = member_can_be_moderated(moderator, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     allowed, error = bot_can_manage_member(guild, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     reason = safe_text(reason, 500)
+    display = target_display(member, notify)
 
     try:
         await member.ban(
@@ -1295,14 +1326,14 @@ async def ban_member(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to ban that member.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Ban failed in guild %s", guild.id)
         await interaction.response.send_message(
             "Discord rejected the ban request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1315,13 +1346,92 @@ async def ban_member(
     )
 
     await interaction.response.send_message(
-        f"{member} was banned. Case #{case_id}.",
-        ephemeral=True,
+        f"{display} was banned. Case #{case_id}.",
+        ephemeral=False,
     )
 
     await send_log(
         guild,
-        f"Case #{case_id}: {moderator.mention} banned `{member}`. Reason: {reason}",
+        f"Case #{case_id}: {moderator.mention} banned {display}. Reason: {reason}",
+    )
+
+
+@bot.tree.command(name="unban", description="Unban a user by their ID.")
+@app_commands.describe(
+    user_id="The numeric Discord user ID to unban.",
+    reason="The reason for the unban.",
+)
+@app_commands.guild_only()
+@app_commands.checks.has_permissions(ban_members=True)
+@app_commands.checks.cooldown(1, 5.0)
+async def unban_user(
+    interaction: discord.Interaction,
+    user_id: str,
+    reason: str = "No reason provided.",
+) -> None:
+    guild = interaction.guild
+    moderator = interaction.user
+    assert guild is not None
+    assert isinstance(moderator, discord.Member)
+
+    if not user_id.isdigit():
+        await interaction.response.send_message(
+            "Provide a numeric Discord user ID (right-click the ban entry to copy it).",
+            ephemeral=False,
+        )
+        return
+
+    target_id = int(user_id)
+    reason = safe_text(reason, 500)
+
+    try:
+        ban_entry = await guild.fetch_ban(discord.Object(id=target_id))
+    except discord.NotFound:
+        await interaction.response.send_message(
+            "That user does not appear to be banned.",
+            ephemeral=False,
+        )
+        return
+    except discord.HTTPException:
+        logger.exception("Fetching ban entry failed in guild %s", guild.id)
+        await interaction.response.send_message(
+            "Discord rejected the ban lookup.",
+            ephemeral=False,
+        )
+        return
+
+    try:
+        await guild.unban(ban_entry.user, reason=reason)
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "I do not have permission to unban that user.",
+            ephemeral=False,
+        )
+        return
+    except discord.HTTPException:
+        logger.exception("Unban failed in guild %s", guild.id)
+        await interaction.response.send_message(
+            "Discord rejected the unban request.",
+            ephemeral=False,
+        )
+        return
+
+    case_id = await create_case(
+        guild,
+        "unban",
+        target_id,
+        moderator.id,
+        reason,
+    )
+
+    await interaction.response.send_message(
+        f"`{ban_entry.user}` was unbanned. Case #{case_id}.",
+        ephemeral=False,
+    )
+
+    await send_log(
+        guild,
+        f"Case #{case_id}: {moderator.mention} unbanned `{ban_entry.user}`. Reason: {reason}",
     )
 
 
@@ -1330,6 +1440,7 @@ async def ban_member(
     member="The member to timeout.",
     minutes="Timeout length in minutes.",
     reason="The reason for the timeout.",
+    notify="If true, publicly @mention the member instead of just naming them.",
 )
 @app_commands.guild_only()
 @app_commands.checks.has_permissions(moderate_members=True)
@@ -1339,6 +1450,7 @@ async def timeout_member(
     member: discord.Member,
     minutes: app_commands.Range[int, 1, 40320],
     reason: str = "No reason provided.",
+    notify: bool = False,
 ) -> None:
     guild = interaction.guild
     moderator = interaction.user
@@ -1347,15 +1459,16 @@ async def timeout_member(
 
     allowed, error = member_can_be_moderated(moderator, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     allowed, error = bot_can_manage_member(guild, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     reason = safe_text(reason, 500)
+    display = target_display(member, notify)
 
     try:
         await member.timeout(
@@ -1365,14 +1478,14 @@ async def timeout_member(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to timeout that member.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Timeout failed in guild %s", guild.id)
         await interaction.response.send_message(
             "Discord rejected the timeout request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1385,13 +1498,13 @@ async def timeout_member(
     )
 
     await interaction.response.send_message(
-        f"{member} was timed out for {minutes} minutes. Case #{case_id}.",
-        ephemeral=True,
+        f"{display} was timed out for {minutes} minutes. Case #{case_id}.",
+        ephemeral=False,
     )
 
     await send_log(
         guild,
-        f"Case #{case_id}: {moderator.mention} timed out `{member}` "
+        f"Case #{case_id}: {moderator.mention} timed out {display} "
         f"for {minutes} minutes. Reason: {reason}",
     )
 
@@ -1411,12 +1524,12 @@ async def untimeout_member(
 
     allowed, error = member_can_be_moderated(moderator, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     allowed, error = bot_can_manage_member(guild, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     try:
@@ -1424,20 +1537,20 @@ async def untimeout_member(
     except discord.Forbidden:
         await interaction.response.send_message(
             "I do not have permission to remove that timeout.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
     except discord.HTTPException:
         logger.exception("Removing timeout failed.")
         await interaction.response.send_message(
             "Discord rejected the timeout removal request.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
     await interaction.response.send_message(
         f"Timeout removed from {member.mention}.",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -1445,6 +1558,7 @@ async def untimeout_member(
 @app_commands.describe(
     member="The member to warn.",
     reason="The warning reason.",
+    notify="If true, publicly @mention the member instead of just naming them.",
 )
 @app_commands.guild_only()
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -1453,6 +1567,7 @@ async def warn_member(
     interaction: discord.Interaction,
     member: discord.Member,
     reason: str = "No reason provided.",
+    notify: bool = False,
 ) -> None:
     guild = interaction.guild
     moderator = interaction.user
@@ -1461,10 +1576,11 @@ async def warn_member(
 
     allowed, error = member_can_be_moderated(moderator, member)
     if not allowed:
-        await interaction.response.send_message(error, ephemeral=True)
+        await interaction.response.send_message(error, ephemeral=False)
         return
 
     reason = safe_text(reason, 500)
+    display = target_display(member, notify)
 
     await db.execute(
         """
@@ -1473,6 +1589,14 @@ async def warn_member(
         VALUES (?, ?, ?, ?, ?)
         """,
         (guild.id, member.id, moderator.id, reason, now()),
+    )
+
+    await create_case(
+        guild,
+        "warn",
+        member.id,
+        moderator.id,
+        reason,
     )
 
     count_row = await db.fetchone(
@@ -1488,13 +1612,13 @@ async def warn_member(
     count = count_row["count"] if count_row else 1
 
     await interaction.response.send_message(
-        f"{member.mention} was warned. They now have {count} warning(s).",
-        ephemeral=True,
+        f"{display} was warned. They now have {count} warning(s).",
+        ephemeral=False,
     )
 
     await send_log(
         guild,
-        f"{moderator.mention} warned {member.mention}. "
+        f"{moderator.mention} warned {display}. "
         f"Total warnings: {count}. Reason: {reason}",
     )
 
@@ -1525,7 +1649,7 @@ async def view_warnings(
     if not rows:
         await interaction.response.send_message(
             f"{member.mention} has no warnings.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -1546,8 +1670,186 @@ async def view_warnings(
 
     await interaction.response.send_message(
         embed=embed,
-        ephemeral=True,
+        ephemeral=False,
     )
+
+
+@bot.tree.command(name="purge", description="Bulk delete recent messages in this channel.")
+@app_commands.describe(
+    amount="Number of messages to scan and delete, from 1 to 100.",
+    member="Only delete messages sent by this member.",
+)
+@app_commands.guild_only()
+@app_commands.checks.has_permissions(manage_messages=True)
+@app_commands.checks.cooldown(1, 10.0)
+async def purge_messages(
+    interaction: discord.Interaction,
+    amount: app_commands.Range[int, 1, 100],
+    member: Optional[discord.Member] = None,
+) -> None:
+    guild = interaction.guild
+    channel = interaction.channel
+    moderator = interaction.user
+    assert guild is not None
+    assert isinstance(moderator, discord.Member)
+
+    if not isinstance(channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "This command can only be used in a text channel.",
+            ephemeral=False,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=False)
+
+    def check(msg: discord.Message) -> bool:
+        return member is None or msg.author.id == member.id
+
+    try:
+        deleted = await channel.purge(
+            limit=amount,
+            check=check,
+            reason=f"Purged by {moderator} ({moderator.id})",
+        )
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "I do not have permission to delete messages here.",
+        )
+        return
+    except discord.HTTPException:
+        logger.exception("Purge failed in guild %s", guild.id)
+        await interaction.followup.send(
+            "Discord rejected the purge request.",
+        )
+        return
+
+    scope = f" from {member.mention}" if member else ""
+    await interaction.followup.send(
+        f"Deleted {len(deleted)} message(s){scope}.",
+    )
+
+    await send_log(
+        guild,
+        f"{moderator.mention} purged {len(deleted)} message(s){scope} in {channel.mention}.",
+    )
+
+
+@bot.tree.command(name="case", description="Look up a single moderation case by its ID.")
+@app_commands.describe(case_id="The case number to look up.")
+@app_commands.guild_only()
+@app_commands.checks.has_permissions(manage_messages=True)
+async def case_lookup(
+    interaction: discord.Interaction,
+    case_id: int,
+) -> None:
+    guild = interaction.guild
+    assert guild is not None
+
+    row = await db.fetchone(
+        """
+        SELECT case_id, action, target_id, moderator_id, reason, created_at
+        FROM moderation_cases
+        WHERE guild_id = ?
+          AND case_id = ?
+        """,
+        (guild.id, case_id),
+    )
+
+    if not row:
+        await interaction.response.send_message(
+            f"Case #{case_id} was not found.",
+            ephemeral=False,
+        )
+        return
+
+    target = guild.get_member(row["target_id"])
+    moderator = guild.get_member(row["moderator_id"])
+
+    embed = discord.Embed(
+        title=f"Case #{row['case_id']} — {row['action'].title()}",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="Target",
+        value=target.mention if target else f"`{row['target_id']}`",
+        inline=True,
+    )
+    embed.add_field(
+        name="Moderator",
+        value=moderator.mention if moderator else f"`{row['moderator_id']}`",
+        inline=True,
+    )
+    embed.add_field(
+        name="Reason",
+        value=row["reason"] or "No reason provided.",
+        inline=False,
+    )
+    embed.set_footer(text=f"Case created <t:{row['created_at']}:R>")
+
+    await interaction.response.send_message(embed=embed, ephemeral=False)
+
+
+@bot.tree.command(name="history", description="View a member's full moderation history.")
+@app_commands.describe(member="The member to look up.")
+@app_commands.guild_only()
+@app_commands.checks.has_permissions(manage_messages=True)
+async def moderation_history(
+    interaction: discord.Interaction,
+    member: discord.Member,
+) -> None:
+    guild = interaction.guild
+    assert guild is not None
+
+    cases = await db.fetchall(
+        """
+        SELECT case_id, action, moderator_id, reason, created_at
+        FROM moderation_cases
+        WHERE guild_id = ?
+          AND target_id = ?
+        ORDER BY case_id DESC
+        LIMIT 15
+        """,
+        (guild.id, member.id),
+    )
+
+    warning_count_row = await db.fetchone(
+        """
+        SELECT COUNT(*) AS count
+        FROM warnings
+        WHERE guild_id = ?
+          AND user_id = ?
+        """,
+        (guild.id, member.id),
+    )
+    warning_count = warning_count_row["count"] if warning_count_row else 0
+
+    embed = discord.Embed(
+        title=f"Moderation History — {member}",
+        color=discord.Color.orange(),
+    )
+    embed.add_field(name="Total Warnings", value=str(warning_count), inline=False)
+
+    if cases:
+        lines = []
+        for row in cases:
+            mod = guild.get_member(row["moderator_id"])
+            mod_name = mod.display_name if mod else "Unknown moderator"
+            lines.append(
+                f"**#{row['case_id']}** `{row['action']}` by {mod_name} — {row['reason']}"
+            )
+        embed.add_field(
+            name="Recent Cases",
+            value="\n".join(lines)[:1024],
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="Recent Cases",
+            value="No moderation cases on record.",
+            inline=False,
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 # ---------------------------------------------------------------------------
