@@ -3,7 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("MTUyNDY4NzA0OTcwNDA4MzU5Nw.GktjzE.BYMvTzUUEljLeUkL530kBgnk4g2-tzAa4N1NP0")
 
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
