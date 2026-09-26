@@ -1,20 +1,29 @@
+import logging
 import os
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-TOKEN = os.getenv("MTUyNDY4NzA0OTcwNDA4MzU5Nw.GktjzE.BYMvTzUUEljLeUkL530kBgnk4g2-tzAa4N1NP0")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN is not set")
+    raise RuntimeError("DISCORD_TOKEN is not configured")
 
 
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
+
         super().__init__(
             command_prefix="!",
-            intents=intents
+            intents=intents,
         )
 
     async def setup_hook(self):
@@ -26,19 +35,25 @@ bot = MyBot()
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    logging.info("Bot is online as %s", bot.user)
 
 
-@bot.tree.command(name="hello", description="Says hello")
+@bot.tree.command(
+    name="hello",
+    description="The bot says hello",
+)
 async def hello(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"Hello, {interaction.user.mention}!"
     )
 
 
-@bot.tree.command(name="ping", description="Checks whether the bot is online")
+@bot.tree.command(
+    name="ping",
+    description="Checks whether the bot is online",
+)
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("Pong!")
 
 
-bot.run(TOKEN)
+bot.run(TOKEN, log_handler=None)
