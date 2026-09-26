@@ -33,4 +33,5 @@ jobs:
       - name: Start bot
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
         run: python bot.py
